@@ -16,8 +16,19 @@ Do robots speak of electric dreams?
 
 ## 🧱 Project Management
 
+Work for this repository is housed in this [Trello board](https://trello.com/b/ZN1a9zrh/murmur).
+
 ## 📁 Project Structure
+
+```bash
+├── cmd/                                         #
+│   └── murmur/                                  # Houses the core Go files for the server
+```
 
 ## 🛠️ Built With
 
+- [Golang](https://go.dev/)
+
 ## 🙇🏻‍♂️ Acknowledgements
+
+- To my parents for always encouraging creativity, curiousity, and persistence
