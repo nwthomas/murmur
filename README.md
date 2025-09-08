@@ -1,3 +1,5 @@
+> NOTE: This is obviously a repository in draft. However, I like to build in public. This is a project I've had on the backburner for many months as you can see from my initial commits. Art is worth pursuing for its own sake, and so I want to make this repository public as I flesh it out.
+
 # Murmur
 
 ## 🔎 About
