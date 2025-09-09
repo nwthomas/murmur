@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  murmur:
+    build: .
+    container_name: murmur-cli
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-3.5-turbo}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - THEME=${THEME:-default}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - TIMEOUT=${TIMEOUT:-30}
+    volumes:
+      # Mount current directory for development
+      - .:/app
+    stdin_open: true
+    tty: true
+    # Override the entrypoint for interactive use
+    entrypoint: ["./murmur"]
+    profiles:
+      - cli
+
+  # Development service with live reload
+  murmur-dev:
+    build:
+      context: .
+      target: builder
+    container_name: murmur-dev
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-3.5-turbo}
+      - DEBUG=true
+      - LOG_LEVEL=debug
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: ["go", "run", "./cmd/murmur/main.go"]
+    stdin_open: true
+    tty: true
+    profiles:
+      - dev

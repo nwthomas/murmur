@@ -1,100 +1,154 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/nwthomas/murmur/internal/ai"
+	"github.com/nwthomas/murmur/internal/config"
+	"github.com/nwthomas/murmur/internal/logger"
 )
 
-type statusMsg int
+// Version information
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
 
-type errMsg struct{ err error }
+// CLI flags
+var (
+	showVersion = flag.Bool("version", false, "Show version information")
+	debug       = flag.Bool("debug", false, "Enable debug mode")
+	prompt      = flag.String("prompt", "", "Poem prompt (if not provided, will use interactive mode)")
+)
+
+// Poem generation messages
+type poemMsg struct {
+	content string
+	err     error
+}
 
 type model struct {
-	status int
-	err    error
+	prompt     string
+	poem       string
+	loading    bool
+	err        error
+	aiClient   *ai.Client
+	logger     *logger.Logger
 }
 
-func checkServer() tea.Msg {
-
-	// Create an HTTP client and make a GET request.
-	c := &http.Client{Timeout: 10 * time.Second}
-	res, err := c.Get("https://jsonplaceholder.typicode.com/todos/1")
-
-	if err != nil {
-		// There was an error making our request. Wrap the error we received
-		// in a message and return it.
-		return errMsg{err}
-	}
-	// We received a response from the server. Return the HTTP status code
-	// as a message.
-	return statusMsg(res.StatusCode)
-}
-
-// For messages that contain errors it's often handy to also implement the
-// error interface on the message.
-func (e errMsg) Error() string {
-	return e.err.Error()
+// generatePoem generates a poem using the AI client
+func (m model) generatePoem() tea.Msg {
+	ctx := context.Background()
+	poem, err := m.aiClient.GeneratePoem(ctx, m.prompt)
+	return poemMsg{content: poem, err: err}
 }
 
 func (m model) Init() tea.Cmd {
-	return checkServer
+	if m.prompt == "" {
+		// Interactive mode - show prompt input
+		return nil
+	}
+	// Direct mode - generate poem immediately
+	m.loading = true
+	return m.generatePoem
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
-	case statusMsg:
-		// The server returned a status message. Save it to our model. Also
-		// tell the Bubble Tea runtime we want to exit because we have nothing
-		// else to do. We'll still be able to render a final view with our
-		// status message.
-		m.status = int(msg)
-		return m, tea.Quit
-
-	case errMsg:
-		// There was an error. Note it in the model. And tell the runtime
-		// we're done and want to quit.
-		m.err = msg
+	case poemMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.logger.Error("Failed to generate poem", "error", msg.err)
+		} else {
+			m.poem = msg.content
+			m.logger.Info("Poem generated successfully")
+		}
 		return m, tea.Quit
 
 	case tea.KeyMsg:
-		// Ctrl+c exits. Even with short running programs it's good to have
-		// a quit key, just in case your logic is off. Users will be very
-		// annoyed if they can't exit.
-		if msg.Type == tea.KeyCtrlC {
+		switch msg.Type {
+		case tea.KeyCtrlC:
 			return m, tea.Quit
+		case tea.KeyEnter:
+			if m.prompt == "" {
+				// In interactive mode, start generating
+				m.loading = true
+				return m, m.generatePoem
+			}
 		}
 	}
 
-	// If we happen to get any other messages, don't do anything.
 	return m, nil
 }
 
 func (m model) View() string {
-	// If there's an error, print it out and don't do anything else.
 	if m.err != nil {
-		return fmt.Sprintf("\nWe had some trouble: %v\n\n", m.err)
+		return fmt.Sprintf("\n❌ Error: %v\n\nPress Ctrl+C to exit.\n", m.err)
 	}
 
-	// Tell the user we're doing something.
-	s := fmt.Sprintf("Checking %v ... ", "https://jsonplaceholder.typicode.com/todos/1")
-
-	// When the server responds with a status, add it to the current line.
-	if m.status > 0 {
-		s += fmt.Sprintf("%d %s!", m.status, http.StatusText(m.status))
+	if m.loading {
+		return "\n🎭 Generating your poem...\n\nPress Ctrl+C to cancel.\n"
 	}
 
-	// Send off whatever we came up with above for rendering.
-	return "\n" + s + "\n\n"
+	if m.poem != "" {
+		return fmt.Sprintf("\n✨ Your Poem:\n\n%s\n\nPress Ctrl+C to exit.\n", m.poem)
+	}
+
+	// Interactive prompt input
+	return "\n🎭 Murmur - AI Poetry Generator\n\nEnter your poem prompt: _\n\nPress Enter to generate or Ctrl+C to exit.\n"
 }
 
 func main() {
-	if _, err := tea.NewProgram(model{}).Run(); err != nil {
-		fmt.Printf("Uh oh, there was an error: %v\n", err)
+	flag.Parse()
+
+	// Show version information
+	if *showVersion {
+		fmt.Printf("murmur version %s (commit: %s, built: %s)\n", version, commit, date)
+		os.Exit(0)
+	}
+
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Override debug setting if provided via flag
+	if *debug {
+		cfg.Debug = true
+	}
+
+	// Initialize logger
+	log := logger.New(cfg.LogLevel, cfg.Debug)
+	log.Info("Starting Murmur", "version", version)
+
+	// Initialize AI client
+	aiClient := ai.NewClient(cfg.OpenAIAPIKey, cfg.Model)
+
+	// Determine prompt
+	promptText := *prompt
+	if promptText == "" {
+		// Interactive mode - we'll handle input in the UI
+		promptText = ""
+	}
+
+	// Create and run the Bubble Tea program
+	initialModel := model{
+		prompt:   promptText,
+		aiClient: aiClient,
+		logger:   log,
+	}
+
+	p := tea.NewProgram(initialModel, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		log.Error("Program error", "error", err)
 		os.Exit(1)
 	}
 }
